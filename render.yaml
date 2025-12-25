@@ -3,5 +3,5 @@ services:
     name: netflix-recommendation
     env: python
     pythonVersion: 3.11
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    buildCommand: pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:10000
