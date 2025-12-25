@@ -6,16 +6,25 @@ from flask import Flask, render_template,request
 
 def get_recommendations(title, cosine_sim):
     global result
-    title=title.replace(' ','').lower()
+    title = title.replace(' ', '').lower()
+    
+    model_data = load_model_data()
+    if model_data is None:
+        return None, None
+    
+    indices = model_data['indices']
+    netflix_overall = model_data['netflix_data']
+    
     try:
         idx = indices[title]
     except KeyError:
         return None, None
+    
     sim_scores = list(enumerate(cosine_sim[idx]))
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
     sim_scores = sim_scores[1:11]
     movie_indices = [i[0] for i in sim_scores]
-    result =  netflix_overall['title'].iloc[movie_indices]
+    result = netflix_overall['title'].iloc[movie_indices]
     result = result.to_frame()
     result = result.reset_index()
     del result['index']
@@ -25,12 +34,20 @@ def get_recommendations(title, cosine_sim):
     
     return result, movie_details
 
-# Load the model and data from compressed pickle file
-with gzip.open("model.pkl.gz",'rb') as file:
-    model_data = pickle.load(file)
-    cosine_sim2 = model_data['cosine_sim']
-    indices = model_data['indices']
-    netflix_overall = model_data['netflix_data']
+# Global variables for lazy loading
+_model_data = None
+
+def load_model_data():
+    """Lazy load model data to save memory on startup"""
+    global _model_data
+    if _model_data is None:
+        try:
+            with gzip.open("model.pkl.gz", 'rb') as file:
+                _model_data = pickle.load(file)
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            return None
+    return _model_data
 
 
 
@@ -47,7 +64,13 @@ def getvalue():
         if not moviename:
             return render_template('index.html', error=True, movie_name="", error_msg="Please enter a movie name")
         
+        model_data = load_model_data()
+        if model_data is None:
+            return render_template('index.html', error=True, movie_name=moviename, error_msg="Model failed to load. Please try again.")
+        
+        cosine_sim2 = model_data['cosine_sim']
         result, movie_details = get_recommendations(moviename, cosine_sim2)
+        
         if result is None:
             return render_template('index.html', error=True, movie_name=moviename, error_msg=f"Movie '{moviename}' not found. Please try another title.")
         
