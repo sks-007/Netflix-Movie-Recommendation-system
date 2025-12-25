@@ -17,7 +17,11 @@
 			{% if error %}
 			<div class="error-message">
 				<p>❌ <strong>Movie/Show Not Found!</strong></p>
-				<p>We couldn't find "{{ movie_name }}" in our database.</p>
+				{% if error_msg %}
+					<p>{{ error_msg }}</p>
+				{% else %}
+					<p>We couldn't find "{{ movie_name }}" in our database.</p>
+				{% endif %}
 				<p>Please check the spelling or try another title.</p>
 			</div>
 			{% endif %}
