@@ -6,6 +6,7 @@ import gc
 import numpy as np
 from flask import Flask, render_template, request
 import os
+import sys
 
 # Global variables for lazy loading
 _model_data = None
@@ -15,22 +16,32 @@ def load_model_data():
     global _model_data
     if _model_data is None:
         try:
-            model_path = os.path.join(os.path.dirname(__file__), 'model.pkl.gz')
-            print(f"Attempting to load model from: {model_path}")
-            print(f"File exists: {os.path.exists(model_path)}")
+            # Get the directory where app.py is located
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(app_dir, 'model.pkl.gz')
+            
+            print(f"App directory: {app_dir}", file=sys.stderr)
+            print(f"Attempting to load model from: {model_path}", file=sys.stderr)
+            print(f"File exists: {os.path.exists(model_path)}", file=sys.stderr)
+            
+            if not os.path.exists(model_path):
+                print(f"ERROR: Model file not found at {model_path}", file=sys.stderr)
+                print(f"Files in directory: {os.listdir(app_dir)}", file=sys.stderr)
+                return None
             
             with gzip.open(model_path, 'rb') as file:
                 _model_data = pickle.load(file)
             
-            print(f"Model loaded successfully!")
-            print(f"Model keys: {list(_model_data.keys())}")
+            print(f"Model loaded successfully!", file=sys.stderr)
+            print(f"Model keys: {list(_model_data.keys())}", file=sys.stderr)
+            print(f"Cosine matrix shape: {_model_data['cosine_sim'].shape}", file=sys.stderr)
             
             # Force garbage collection after loading
             gc.collect()
         except Exception as e:
-            print(f"Error loading model: {type(e).__name__}: {e}")
+            print(f"ERROR loading model: {type(e).__name__}: {e}", file=sys.stderr)
             import traceback
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stderr)
             _model_data = None
             return None
     
@@ -90,7 +101,14 @@ def get_recommendations(title, cosine_sim):
         traceback.print_exc()
         return None, None
 
-app = Flask(__name__)
+app = Flask(__name__, 
+            template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
+            static_folder=os.path.join(os.path.dirname(__file__), 'static'),
+            static_url_path='/static')
+
+# Configure Flask for production
+app.config['ENV'] = 'production'
+app.config['DEBUG'] = False
 
 @app.route('/')
 def index():
@@ -147,10 +165,11 @@ def getvalue():
         return render_template('result.html', tables=[df.to_html(classes='data', index=False)], titles=df.columns.values, movie_details=details)
     
     except Exception as e:
-        print(f"Error in getvalue: {e}")
+        print(f"Error in getvalue: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         return render_template('index.html', error=True, movie_name=request.form.get('moviename', ''), error_msg=f"An error occurred: {str(e)}")
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    # This won't run on Render, Gunicorn will run the app instead
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
