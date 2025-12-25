@@ -4,7 +4,37 @@ import pickle
 import gzip
 import gc
 import numpy as np
-from flask import Flask, render_template,request
+from flask import Flask, render_template, request
+import os
+
+# Global variables for lazy loading
+_model_data = None
+
+def load_model_data():
+    """Lazy load model data to save memory on startup"""
+    global _model_data
+    if _model_data is None:
+        try:
+            model_path = os.path.join(os.path.dirname(__file__), 'model.pkl.gz')
+            print(f"Attempting to load model from: {model_path}")
+            print(f"File exists: {os.path.exists(model_path)}")
+            
+            with gzip.open(model_path, 'rb') as file:
+                _model_data = pickle.load(file)
+            
+            print(f"Model loaded successfully!")
+            print(f"Model keys: {list(_model_data.keys())}")
+            
+            # Force garbage collection after loading
+            gc.collect()
+        except Exception as e:
+            print(f"Error loading model: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            _model_data = None
+            return None
+    
+    return _model_data
 
 def get_recommendations(title, cosine_sim):
     """Get movie recommendations based on cosine similarity"""
@@ -56,26 +86,9 @@ def get_recommendations(title, cosine_sim):
         return result, movie_details
     except Exception as e:
         print(f"Error getting recommendations: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None
-
-# Global variables for lazy loading
-_model_data = None
-
-def load_model_data():
-    """Lazy load model data to save memory on startup"""
-    global _model_data
-    if _model_data is None:
-        try:
-            with gzip.open("model.pkl.gz", 'rb') as file:
-                _model_data = pickle.load(file)
-            # Force garbage collection after loading
-            gc.collect()
-        except Exception as e:
-            print(f"Error loading model: {e}")
-            return None
-    return _model_data
-
-
 
 app = Flask(__name__)
 
@@ -83,7 +96,7 @@ app = Flask(__name__)
 def index():
     return render_template('index.html') 
 
-@app.route('/about',methods=['POST'])
+@app.route('/about', methods=['POST'])
 def getvalue():
     try:
         moviename = request.form['moviename'].strip()
@@ -135,6 +148,8 @@ def getvalue():
     
     except Exception as e:
         print(f"Error in getvalue: {e}")
+        import traceback
+        traceback.print_exc()
         return render_template('index.html', error=True, movie_name=request.form.get('moviename', ''), error_msg=f"An error occurred: {str(e)}")
 
 if __name__ == '__main__':
