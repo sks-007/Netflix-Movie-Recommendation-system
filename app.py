@@ -2,6 +2,8 @@
 import pandas as pd
 import pickle
 import gzip
+import gc
+import numpy as np
 from flask import Flask, render_template,request
 
 def get_recommendations(title, cosine_sim):
@@ -44,6 +46,8 @@ def load_model_data():
         try:
             with gzip.open("model.pkl.gz", 'rb') as file:
                 _model_data = pickle.load(file)
+            # Force garbage collection after loading
+            gc.collect()
         except Exception as e:
             print(f"Error loading model: {e}")
             return None
