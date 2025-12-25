@@ -1,3 +1,7 @@
+"""
+Netflix Movie Recommendation System - Flask Application
+Recommends movies based on content similarity
+"""
 
 import pandas as pd
 import pickle
@@ -7,6 +11,15 @@ import numpy as np
 from flask import Flask, render_template, request
 import os
 import sys
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
 
 # Global variables for lazy loading
 _model_data = None
@@ -14,133 +27,188 @@ _model_data = None
 def load_model_data():
     """Lazy load model data to save memory on startup"""
     global _model_data
-    if _model_data is None:
-        try:
-            # Get the directory where app.py is located
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.join(app_dir, 'model.pkl.gz')
-            
-            print(f"App directory: {app_dir}", file=sys.stderr)
-            print(f"Attempting to load model from: {model_path}", file=sys.stderr)
-            print(f"File exists: {os.path.exists(model_path)}", file=sys.stderr)
-            
-            if not os.path.exists(model_path):
-                print(f"ERROR: Model file not found at {model_path}", file=sys.stderr)
-                print(f"Files in directory: {os.listdir(app_dir)}", file=sys.stderr)
-                return None
-            
-            with gzip.open(model_path, 'rb') as file:
-                _model_data = pickle.load(file)
-            
-            print(f"Model loaded successfully!", file=sys.stderr)
-            print(f"Model keys: {list(_model_data.keys())}", file=sys.stderr)
-            print(f"Cosine matrix shape: {_model_data['cosine_sim'].shape}", file=sys.stderr)
-            
-            # Force garbage collection after loading
-            gc.collect()
-        except Exception as e:
-            print(f"ERROR loading model: {type(e).__name__}: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            _model_data = None
-            return None
     
-    return _model_data
+    if _model_data is not None:
+        return _model_data
+    
+    try:
+        # Get absolute path to model file
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(app_dir, 'model.pkl.gz')
+        
+        logger.info(f"Loading model from: {model_path}")
+        
+        if not os.path.exists(model_path):
+            logger.error(f"Model file not found: {model_path}")
+            logger.error(f"Files in directory: {os.listdir(app_dir)}")
+            return None
+        
+        file_size_mb = os.path.getsize(model_path) / (1024 * 1024)
+        logger.info(f"Model file size: {file_size_mb:.2f} MB")
+        
+        with gzip.open(model_path, 'rb') as file:
+            _model_data = pickle.load(file)
+        
+        logger.info("Model loaded successfully!")
+        logger.info(f"Model keys: {list(_model_data.keys())}")
+        logger.info(f"Cosine matrix dtype: {_model_data['cosine_sim'].dtype}")
+        logger.info(f"Cosine matrix shape: {_model_data['cosine_sim'].shape}")
+        logger.info(f"Dataset shape: {_model_data['netflix_data'].shape}")
+        logger.info(f"Number of titles: {len(_model_data['indices'])}")
+        
+        gc.collect()
+        logger.info("Garbage collection completed")
+        
+        return _model_data
+        
+    except Exception as e:
+        logger.error(f"Error loading model: {type(e).__name__}: {e}", exc_info=True)
+        _model_data = None
+        return None
+
 
 def get_recommendations(title, cosine_sim):
     """Get movie recommendations based on cosine similarity"""
-    global result
     
-    # Load model data
     model_data = load_model_data()
     if model_data is None:
+        logger.error("Model data not available")
         return None, None
-    
-    indices = model_data['indices']
-    netflix_overall = model_data['netflix_data']
-    
-    # Try different title formats to match with indices
-    title_clean = title.replace(' ', '').lower()
-    
-    idx = None
-    
-    # Try exact match without spaces
-    if title_clean in indices:
-        idx = indices[title_clean]
-    # Try with original spaces but lowercase
-    elif title.lower() in indices:
-        idx = indices[title.lower()]
-    # Try searching in the dataframe for partial matches
-    else:
-        # Search for the title in the dataframe (case-insensitive)
-        mask = netflix_overall['title'].str.lower().str.contains(title.lower(), case=False, na=False)
-        if mask.any():
-            idx = netflix_overall[mask].index[0]
-        else:
-            return None, None
     
     try:
-        # Get cosine similarity scores for this movie
+        indices = model_data['indices']
+        netflix_overall = model_data['netflix_data']
+        
+        logger.info(f"Searching for: '{title}'")
+        
+        # Try different title matching strategies
+        title_clean = title.replace(' ', '').lower()
+        idx = None
+        matched_title = None
+        
+        # Strategy 1: Exact match without spaces
+        if title_clean in indices:
+            idx = indices[title_clean]
+            matched_title = "exact match (no spaces)"
+            logger.info(f"Found: {matched_title}")
+        
+        # Strategy 2: Exact match with spaces (lowercase)
+        elif title.lower() in indices:
+            idx = indices[title.lower()]
+            matched_title = "exact match (with spaces)"
+            logger.info(f"Found: {matched_title}")
+        
+        # Strategy 3: Partial/fuzzy match in dataframe
+        else:
+            mask = netflix_overall['title'].str.lower().str.contains(
+                title.lower(), case=False, na=False, regex=False
+            )
+            if mask.any():
+                # Get the first match
+                matched_idx = netflix_overall[mask].index[0]
+                idx = matched_idx
+                matched_title = "fuzzy match in dataframe"
+                logger.info(f"Found: {matched_title} - Index: {idx}")
+            else:
+                logger.warning(f"Title '{title}' not found in any format")
+                return None, None
+        
+        if idx is None:
+            logger.error("Could not find title index")
+            return None, None
+        
+        # Get cosine similarity scores
+        logger.info(f"Getting recommendations for index {idx}")
         sim_scores = list(enumerate(cosine_sim[idx]))
         sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        
+        # Get top 10 (excluding the movie itself at index 0)
         sim_scores = sim_scores[1:11]
-        movie_indices = [i[0] for i in sim_scores]
+        movie_indices = [int(i[0]) for i in sim_scores]
         
-        result = netflix_overall['title'].iloc[movie_indices]
-        result = result.to_frame()
-        result = result.reset_index()
-        del result['index']
+        logger.info(f"Got {len(movie_indices)} recommendations")
         
-        # Get details of the searched movie
+        # Get recommendation titles
+        recommendations = netflix_overall['title'].iloc[movie_indices]
+        result_df = recommendations.to_frame()
+        result_df = result_df.reset_index()
+        
+        if 'index' in result_df.columns:
+            del result_df['index']
+        
+        # Get searched movie details
         movie_details = netflix_overall.iloc[idx]
         
-        return result, movie_details
+        logger.info("Successfully generated recommendations")
+        return result_df, movie_details
+        
     except Exception as e:
-        print(f"Error getting recommendations: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error generating recommendations: {e}", exc_info=True)
         return None, None
 
+
+# Initialize Flask app
 app = Flask(__name__, 
             template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
-            static_folder=os.path.join(os.path.dirname(__file__), 'static'),
-            static_url_path='/static')
+            static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 
-# Configure Flask for production
+# Configure Flask
 app.config['ENV'] = 'production'
 app.config['DEBUG'] = False
+app.config['JSON_SORT_KEYS'] = False
+
+logger.info(f"Flask app initialized - Working directory: {os.getcwd()}")
+logger.info(f"Templates folder: {app.template_folder}")
+logger.info(f"Static folder: {app.static_folder}")
+
 
 @app.route('/')
 def index():
-    return render_template('index.html') 
+    """Home page route"""
+    return render_template('index.html')
+
 
 @app.route('/about', methods=['POST'])
 def getvalue():
+    """Search and recommendation route"""
     try:
-        moviename = request.form['moviename'].strip()
-        if not moviename:
-            return render_template('index.html', error=True, movie_name="", error_msg="Please enter a movie name")
+        moviename = request.form.get('moviename', '').strip()
         
+        if not moviename:
+            logger.warning("Empty movie name provided")
+            return render_template('index.html', 
+                                 error=True, 
+                                 movie_name="", 
+                                 error_msg="Please enter a movie/show name")
+        
+        logger.info(f"Processing search request for: {moviename}")
+        
+        # Load model and get recommendations
         model_data = load_model_data()
         if model_data is None:
-            return render_template('index.html', error=True, movie_name=moviename, error_msg="Model loading error. Please try again later.")
+            logger.error("Model failed to load")
+            return render_template('index.html',
+                                 error=True,
+                                 movie_name=moviename,
+                                 error_msg="System error: Could not load recommendation model. Please try again later.")
         
-        cosine_sim2 = model_data['cosine_sim']
-        result, movie_details = get_recommendations(moviename, cosine_sim2)
+        cosine_sim = model_data['cosine_sim']
+        result_df, movie_details = get_recommendations(moviename, cosine_sim)
         
-        if result is None or movie_details is None:
-            return render_template('index.html', error=True, movie_name=moviename, error_msg=f"'{moviename}' not found. Please check spelling or try another title.")
+        if result_df is None or movie_details is None:
+            logger.warning(f"No recommendations found for: {moviename}")
+            return render_template('index.html',
+                                 error=True,
+                                 movie_name=moviename,
+                                 error_msg=f"Sorry, '{moviename}' not found. Please check spelling and try another title.")
         
-        df = result
-        df = df.rename(columns={'title': 'Recommended Title of Movies & Shows to watch on Netflix'})
+        # Prepare dataframe
+        df = result_df.copy()
+        df = df.rename(columns={'title': 'Recommended Titles'})
         
-        # Convert movie details to dictionary - handle Series objects
+        # Prepare movie details
         try:
-            if hasattr(movie_details, 'to_dict'):
-                details_dict = movie_details.to_dict()
-            else:
-                details_dict = dict(movie_details)
-            
+            details_dict = movie_details.to_dict() if hasattr(movie_details, 'to_dict') else dict(movie_details)
             details = {
                 'type': str(details_dict.get('type', 'N/A')),
                 'title': str(details_dict.get('title', 'N/A')),
@@ -155,21 +223,44 @@ def getvalue():
                 'description': str(details_dict.get('description', 'N/A'))
             }
         except Exception as e:
-            print(f"Error converting movie details: {e}")
-            details = {
-                'type': 'N/A', 'title': moviename, 'director': 'N/A', 'cast': 'N/A',
-                'country': 'N/A', 'date_added': 'N/A', 'release_year': 'N/A', 'rating': 'N/A',
-                'duration': 'N/A', 'listed_in': 'N/A', 'description': 'N/A'
-            }
+            logger.error(f"Error processing movie details: {e}", exc_info=True)
+            details = {k: 'N/A' for k in ['type', 'title', 'director', 'cast', 'country', 
+                                          'date_added', 'release_year', 'rating', 'duration', 
+                                          'listed_in', 'description']}
         
-        return render_template('result.html', tables=[df.to_html(classes='data', index=False)], titles=df.columns.values, movie_details=details)
+        logger.info(f"Returning results page for: {moviename}")
+        return render_template('result.html',
+                             tables=[df.to_html(classes='data table table-striped', index=False)],
+                             titles=df.columns.values,
+                             movie_details=details)
     
     except Exception as e:
-        print(f"Error in getvalue: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        return render_template('index.html', error=True, movie_name=request.form.get('moviename', ''), error_msg=f"An error occurred: {str(e)}")
+        logger.error(f"Error in search route: {e}", exc_info=True)
+        return render_template('index.html',
+                             error=True,
+                             movie_name=request.form.get('moviename', ''),
+                             error_msg=f"An error occurred: {str(e)}")
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    logger.warning(f"404 error: {error}")
+    return render_template('index.html',
+                         error=True,
+                         error_msg="Page not found"), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    """Handle 500 errors"""
+    logger.error(f"500 error: {error}", exc_info=True)
+    return render_template('index.html',
+                         error=True,
+                         error_msg="Server error occurred. Please try again later."), 500
+
 
 if __name__ == '__main__':
-    # This won't run on Render, Gunicorn will run the app instead
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Starting app on port {port}")
+    app.run(debug=False, host='0.0.0.0', port=port)
