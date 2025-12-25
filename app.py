@@ -7,9 +7,10 @@ import numpy as np
 from flask import Flask, render_template,request
 
 def get_recommendations(title, cosine_sim):
+    """Get movie recommendations based on cosine similarity"""
     global result
-    title = title.replace(' ', '').lower()
     
+    # Load model data
     model_data = load_model_data()
     if model_data is None:
         return None, None
@@ -17,24 +18,45 @@ def get_recommendations(title, cosine_sim):
     indices = model_data['indices']
     netflix_overall = model_data['netflix_data']
     
+    # Try different title formats to match with indices
+    title_clean = title.replace(' ', '').lower()
+    
+    idx = None
+    
+    # Try exact match without spaces
+    if title_clean in indices:
+        idx = indices[title_clean]
+    # Try with original spaces but lowercase
+    elif title.lower() in indices:
+        idx = indices[title.lower()]
+    # Try searching in the dataframe for partial matches
+    else:
+        # Search for the title in the dataframe (case-insensitive)
+        mask = netflix_overall['title'].str.lower().str.contains(title.lower(), case=False, na=False)
+        if mask.any():
+            idx = netflix_overall[mask].index[0]
+        else:
+            return None, None
+    
     try:
-        idx = indices[title]
-    except KeyError:
+        # Get cosine similarity scores for this movie
+        sim_scores = list(enumerate(cosine_sim[idx]))
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        sim_scores = sim_scores[1:11]
+        movie_indices = [i[0] for i in sim_scores]
+        
+        result = netflix_overall['title'].iloc[movie_indices]
+        result = result.to_frame()
+        result = result.reset_index()
+        del result['index']
+        
+        # Get details of the searched movie
+        movie_details = netflix_overall.iloc[idx]
+        
+        return result, movie_details
+    except Exception as e:
+        print(f"Error getting recommendations: {e}")
         return None, None
-    
-    sim_scores = list(enumerate(cosine_sim[idx]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[1:11]
-    movie_indices = [i[0] for i in sim_scores]
-    result = netflix_overall['title'].iloc[movie_indices]
-    result = result.to_frame()
-    result = result.reset_index()
-    del result['index']
-    
-    # Get details of the searched movie
-    movie_details = netflix_overall.iloc[idx]
-    
-    return result, movie_details
 
 # Global variables for lazy loading
 _model_data = None
@@ -70,36 +92,50 @@ def getvalue():
         
         model_data = load_model_data()
         if model_data is None:
-            return render_template('index.html', error=True, movie_name=moviename, error_msg="Model failed to load. Please try again.")
+            return render_template('index.html', error=True, movie_name=moviename, error_msg="Model loading error. Please try again later.")
         
         cosine_sim2 = model_data['cosine_sim']
         result, movie_details = get_recommendations(moviename, cosine_sim2)
         
-        if result is None:
-            return render_template('index.html', error=True, movie_name=moviename, error_msg=f"Movie '{moviename}' not found. Please try another title.")
+        if result is None or movie_details is None:
+            return render_template('index.html', error=True, movie_name=moviename, error_msg=f"'{moviename}' not found. Please check spelling or try another title.")
         
         df = result
         df = df.rename(columns={'title': 'Recommended Title of Movies & Shows to watch on Netflix'})
         
-        # Convert movie details to dictionary
-        details = {
-            'type': movie_details.get('type', 'N/A') if isinstance(movie_details, dict) else movie_details['type'] if 'type' in movie_details else 'N/A',
-            'title': movie_details.get('title', 'N/A') if isinstance(movie_details, dict) else movie_details['title'] if 'title' in movie_details else 'N/A',
-            'director': movie_details.get('director', 'N/A') if isinstance(movie_details, dict) else movie_details['director'] if 'director' in movie_details else 'N/A',
-            'cast': movie_details.get('cast', 'N/A') if isinstance(movie_details, dict) else movie_details['cast'] if 'cast' in movie_details else 'N/A',
-            'country': movie_details.get('country', 'N/A') if isinstance(movie_details, dict) else movie_details['country'] if 'country' in movie_details else 'N/A',
-            'date_added': movie_details.get('date_added', 'N/A') if isinstance(movie_details, dict) else movie_details['date_added'] if 'date_added' in movie_details else 'N/A',
-            'release_year': movie_details.get('release_year', 'N/A') if isinstance(movie_details, dict) else movie_details['release_year'] if 'release_year' in movie_details else 'N/A',
-            'rating': movie_details.get('rating', 'N/A') if isinstance(movie_details, dict) else movie_details['rating'] if 'rating' in movie_details else 'N/A',
-            'duration': movie_details.get('duration', 'N/A') if isinstance(movie_details, dict) else movie_details['duration'] if 'duration' in movie_details else 'N/A',
-            'listed_in': movie_details.get('listed_in', 'N/A') if isinstance(movie_details, dict) else movie_details['listed_in'] if 'listed_in' in movie_details else 'N/A',
-            'description': movie_details.get('description', 'N/A') if isinstance(movie_details, dict) else movie_details['description'] if 'description' in movie_details else 'N/A'
-        }
+        # Convert movie details to dictionary - handle Series objects
+        try:
+            if hasattr(movie_details, 'to_dict'):
+                details_dict = movie_details.to_dict()
+            else:
+                details_dict = dict(movie_details)
+            
+            details = {
+                'type': str(details_dict.get('type', 'N/A')),
+                'title': str(details_dict.get('title', 'N/A')),
+                'director': str(details_dict.get('director', 'N/A')),
+                'cast': str(details_dict.get('cast', 'N/A')),
+                'country': str(details_dict.get('country', 'N/A')),
+                'date_added': str(details_dict.get('date_added', 'N/A')),
+                'release_year': str(details_dict.get('release_year', 'N/A')),
+                'rating': str(details_dict.get('rating', 'N/A')),
+                'duration': str(details_dict.get('duration', 'N/A')),
+                'listed_in': str(details_dict.get('listed_in', 'N/A')),
+                'description': str(details_dict.get('description', 'N/A'))
+            }
+        except Exception as e:
+            print(f"Error converting movie details: {e}")
+            details = {
+                'type': 'N/A', 'title': moviename, 'director': 'N/A', 'cast': 'N/A',
+                'country': 'N/A', 'date_added': 'N/A', 'release_year': 'N/A', 'rating': 'N/A',
+                'duration': 'N/A', 'listed_in': 'N/A', 'description': 'N/A'
+            }
         
         return render_template('result.html', tables=[df.to_html(classes='data', index=False)], titles=df.columns.values, movie_details=details)
     
     except Exception as e:
-        return render_template('index.html', error=True, movie_name=request.form.get('moviename', ''), error_msg=f"Error: {str(e)}")
+        print(f"Error in getvalue: {e}")
+        return render_template('index.html', error=True, movie_name=request.form.get('moviename', ''), error_msg=f"An error occurred: {str(e)}")
 
 if __name__ == '__main__':
     app.run(debug=False)
