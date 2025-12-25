@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Netflix Recommendation System</title>
+	<link rel="stylesheet" href="{{ url_for('static', filename='stylesheets/style.css') }}" />
+	
+</head>
+<body>
+	<div class="container">
+		<div class="header">
+			<h1><mark>Netflix Recommendation System</mark></h1>
+		</div>
+		
+		<div class="content">
+			{% if error %}
+			<div class="error-message">
+				<p>❌ <strong>Movie/Show Not Found!</strong></p>
+				<p>We couldn't find "{{ movie_name }}" in our database.</p>
+				<p>Please check the spelling or try another title.</p>
+			</div>
+			{% endif %}
+			
+			<p class="subtitle"><span>ENTER A TV-SHOW/MOVIE NAME THAT YOU JUST WATCHED</span></p>
+			
+			<form name="passdata" action="/about" method="post" class="search-form">
+				<div class="input-group">
+					<input type="text" name="moviename" placeholder="e.g., Stranger Things, Breaking Bad..." required>
+					<input type="submit" value="Get Recommendations" class="submit-btn">
+				</div>
+			</form>
+		</div>
+	</div>
+	
+	<div class="note-container">
+		<p class="note">⭐ <strong>Note:</strong> Please enter the full and exact name of the movie/show as it appears on Netflix</p>
+	</div>
+</body>
+</html>
