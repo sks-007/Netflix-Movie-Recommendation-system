@@ -1,6 +1,7 @@
 
 import pandas as pd
 import pickle
+import gzip
 from flask import Flask, render_template,request
 
 def get_recommendations(title, cosine_sim):
@@ -24,8 +25,8 @@ def get_recommendations(title, cosine_sim):
     
     return result, movie_details
 
-# Load the model and data from pickle file
-with open("model.pkl",'rb') as file:
+# Load the model and data from compressed pickle file
+with gzip.open("model.pkl.gz",'rb') as file:
     model_data = pickle.load(file)
     cosine_sim2 = model_data['cosine_sim']
     indices = model_data['indices']

@@ -1,0 +1,9 @@
+model.pkl
+netflix_titles.csv
+.ipynb_checkpoints
+__pycache__
+*.pyc
+.venv
+.env
+*.log
+.DS_Store
