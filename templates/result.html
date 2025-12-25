@@ -2,16 +2,76 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Recommendations</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netflix Recommendations</title>
 	<link rel="stylesheet" href="{{ url_for('static', filename='stylesheets/result.css') }}" />
 </head>
 <body>
-<div class=page>
-  <h1>Here are your recommendations....</h1>
-  {% for table in tables %}
-    <h2>{{titles[loop.index]}}</h2>
-    {{ table|safe }}
-  {% endfor %}
-</div>
+	<div class="container">
+		<div class="header">
+			<h1>🎬 You Searched For</h1>
+		</div>
+		
+		<div class="movie-details">
+			<h2 class="movie-title">{{ movie_details.title }}</h2>
+			<div class="details-grid">
+				<div class="detail-item">
+					<span class="label">Type:</span>
+					<span class="value">{{ movie_details.type }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Director:</span>
+					<span class="value">{{ movie_details.director }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Cast:</span>
+					<span class="value">{{ movie_details.cast }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Country:</span>
+					<span class="value">{{ movie_details.country }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Date Added:</span>
+					<span class="value">{{ movie_details.date_added }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Release Year:</span>
+					<span class="value">{{ movie_details.release_year }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Rating:</span>
+					<span class="value">{{ movie_details.rating }}</span>
+				</div>
+				<div class="detail-item">
+					<span class="label">Duration:</span>
+					<span class="value">{{ movie_details.duration }}</span>
+				</div>
+				<div class="detail-item full-width">
+					<span class="label">Genre:</span>
+					<span class="value">{{ movie_details.listed_in }}</span>
+				</div>
+				<div class="detail-item full-width">
+					<span class="label">Description:</span>
+					<span class="value">{{ movie_details.description }}</span>
+				</div>
+			</div>
+		</div>
+		
+		<div class="recommendations-section">
+			<h1>📺 Recommended Movies & Shows</h1>
+			<p class="subtitle">Based on your selection, here are 10 similar titles you might enjoy</p>
+		</div>
+		
+		<div class="results">
+			{% for table in tables %}
+				{{ table|safe }}
+			{% endfor %}
+		</div>
+		
+		<div class="actions">
+			<a href="/" class="back-btn">← Search Again</a>
+		</div>
+	</div>
 </body>
 </html>
