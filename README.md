@@ -1,4 +1,4 @@
-# Netflix Recommendation System 
+# Netflix Movie Recommendation System 
 
 A content-based recommendation system built with Flask that suggests similar movies and TV shows based on user input. The system analyzes Netflix content using machine learning algorithms to provide personalized recommendations.
 
@@ -223,3 +223,4 @@ The dataset contains:
 - **Optimization**: Compressed with gzip, float32 precision
 
 **Note**: This is an educational project and is not affiliated with or endorsed by Netflix, Inc.
+
