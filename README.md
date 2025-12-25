@@ -2,14 +2,16 @@
 
 A content-based recommendation system built with Flask that suggests similar movies and TV shows based on user input. The system analyzes Netflix content using machine learning algorithms to provide personalized recommendations.
 
+🚀 **[Live Demo](https://netflix-movie-recommendation-system-f1ac.onrender.com)**
+
 ##  Features
 
-- **Content-Based Filtering**: Uses cosine similarity to recommend similar titles based on multiple features
-- **Detailed Movie Information**: Displays comprehensive details about the searched movie/show including cast, director, genre, rating, and description
-- **Top 10 Recommendations**: Provides 10 similar titles based on the search query
-- **User-Friendly Interface**: Clean and intuitive web interface with responsive design
-- **Error Handling**: Graceful handling of invalid or non-existent titles with helpful feedback
-- **Real-Time Search**: Instant recommendations upon submission
+- **Content-Based Filtering**: Uses cosine similarity to recommend similar titles
+- **Detailed Movie Information**: Cast, director, genre, rating, description
+- **Top 10 Recommendations**: Similar titles based on the search query
+- **User-Friendly Interface**: Clean, responsive web design
+- **Real-Time Search**: Instant recommendations
+- **Production Ready**: Optimized for low-memory deployment (512MB)
 
 ##  Technology Stack
 
@@ -136,11 +138,88 @@ Main recommendation function that:
 - Recommendations are based solely on content features, not user ratings or viewing history
 - Performance may vary with very large datasets
 
+## Local Setup
+
+### Prerequisites
+- Python 3.11+
+- pip
+
+### Installation
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/sks-007/Netflix-Movie-Recommendation-system.git
+cd Netflix-Recommendation-System/Netflix-Recommendation-System
+```
+
+2. **Create virtual environment**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. **Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+4. **Run the application**
+```bash
+python app.py
+```
+
+Visit `http://127.0.0.1:5000` in your browser.
+
+## Deployment on Render
+
+### Prerequisites
+- GitHub account with repository
+- Render.com account
+
+### Steps
+
+1. **Connect repository** to Render
+2. **Select branch**: master
+3. **Configure**:
+   - Runtime: Python 3.11
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `gunicorn app:app`
+4. **Deploy** - Render will automatically build and deploy
+
+### Environment Variables
+- `PORT` - Automatically set by Render (default: 8000)
+- `FLASK_ENV` - Set to production
+
+## Performance
+
+| Metric | Value |
+|--------|-------|
+| First Request | 3-5 seconds (model loading) |
+| Subsequent Requests | <1 second |
+| Memory Usage | ~270 MB |
+| Model Size | 18.2 MB (compressed float32) |
+| Dataset | 6,234 titles |
+
+## Architecture
+
+```
+Flask App
+├── Model Loading (Lazy)
+│   └── model.pkl.gz (18 MB)
+├── Recommendation Engine
+│   ├── Cosine Similarity Matching
+│   ├── Title Fuzzy Search
+│   └── Result Ranking
+└── Web Interface
+    ├── Home Page (index.html)
+    └── Results Page (result.html)
+```
+
 ## Dataset Information
 
-The `netflix_titles.csv` dataset contains:
-- **Total entries**: 8,000+ movies and TV shows
-- **Features**: 12 columns including show_id, type, title, director, cast, country, date_added, release_year, rating, duration, listed_in, description
-- **Source**: Netflix content catalog
+The dataset contains:
+- **Total entries**: 6,234 movies and TV shows
+- **Features**: type, title, director, cast, country, date_added, release_year, rating, duration, listed_in, description
+- **Optimization**: Compressed with gzip, float32 precision
 
 **Note**: This is an educational project and is not affiliated with or endorsed by Netflix, Inc.
