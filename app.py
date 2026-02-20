@@ -38,12 +38,7 @@ MAX_MODEL_SIZE_MB = 50
 MODEL_LOAD_TIMEOUT = int(os.environ.get('MODEL_LOAD_TIMEOUT', 120))
 CACHE_SIZE = 128  # Cache recent searches
 
-@lru_cache(maxsize=CACHE_SIZE)
-def cached_get_recommendations(title_lower):
-    \"\"\"Cached recommendation function for performance\"\"\"
-    return get_recommendations_internal(title_lower)
-
-def get_recommendations_internal(title_lower):
+def load_model_data():
     """Lazy load model data with enhanced error handling and memory management"""
     global _model_data, _model_loading
     
@@ -176,9 +171,20 @@ def get_recommendations_internal(title_lower):
         _model_loading = False
 
 
-def get_recommendations(title, cosine_sim):
-    """Get movie recommendations based on cosine similarity"""
+@lru_cache(maxsize=CACHE_SIZE)
+def cached_get_recommendations(title_lower):
+    """Cached recommendation function for performance"""
+    # Call the actual recommendation function
+    model_data = load_model_data()
+    if model_data is None:
+        return None, None
     
+    cosine_sim = model_data['cosine_sim']
+    return get_recommendations_internal(title_lower, cosine_sim)
+
+
+def get_recommendations_internal(title, cosine_sim):
+    """Internal recommendation function (called by cached version)"""
     model_data = load_model_data()
     if model_data is None:
         logger.error("Model data not available")
@@ -254,6 +260,13 @@ def get_recommendations(title, cosine_sim):
     except Exception as e:
         logger.error(f"Error generating recommendations: {e}", exc_info=True)
         return None, None
+
+
+def get_recommendations(title, cosine_sim=None):
+    """Public API for getting recommendations with caching"""
+    # Use cached version for better performance
+    title_lower = title.lower().strip()
+    return cached_get_recommendations(title_lower)
 
 
 # Initialize Flask app
@@ -401,6 +414,10 @@ def metrics():
     except Exception as e:
         logger.error(f"Metrics endpoint failed: {e}")
         return make_response('# Error generating metrics\n', 500)
+
+
+@app.route('/about', methods=['POST'])
+def getvalue():
     """Search and recommendation route"""
     try:
         moviename = request.form.get('moviename', '').strip()
@@ -440,8 +457,8 @@ def metrics():
                                  movie_name=moviename,
                                  error_msg="System error: Could not load recommendation model. Please try again later.")
         
-        cosine_sim = model_data['cosine_sim']
-        result_df, movie_details = get_recommendations(moviename, cosine_sim)
+        # Get recommendations using the new cached API
+        result_df, movie_details = get_recommendations(moviename)
         
         if result_df is None or movie_details is None:
             logger.warning(f"No recommendations found for: {moviename}")
