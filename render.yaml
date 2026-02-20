@@ -4,21 +4,42 @@ services:
     env: python
     pythonVersion: 3.11
     buildCommand: |
-      pip install --upgrade pip
+      echo "🚀 Starting Netflix Recommendation Build Process"
+      pip install --upgrade pip setuptools wheel
       pip install --no-cache-dir -r requirements.txt
       chmod +x start.sh
+      echo "🧪 Running model validation..."
       python test_model.py
-    startCommand: ./start.sh
-    plan: starter  # Use paid plan for better resources (1GB RAM, 0.5 CPU)
+      echo "✅ Build completed successfully"
+    startCommand: bash start.sh
+    # Use starter plan for better resources (1GB RAM, 0.1 CPU)
+    plan: starter
+    # Health check configuration
+    healthCheckPath: /health
+    # Resource and performance optimizations
     envVars:
       - key: PYTHONUNBUFFERED
-        value: true
+        value: "1"
       - key: FLASK_ENV
         value: production
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"  # Prevent .pyc file creation
+      - key: PYTHONPATH
+        value: "."
       - key: GUNICORN_TIMEOUT
-        value: 180
-      - key: MODEL_LOAD_TIMEOUT
-        value: 60
+        value: "300"  # Increased timeout for model loading
+      - key: GUNICORN_GRACEFUL_TIMEOUT
+        value: "60"
+      - key: GUNICORN_MAX_REQUESTS
+        value: "50"  # Reduced for memory efficiency
+      - key: GUNICORN_MAX_REQUESTS_JITTER
+        value: "10"
       - key: WEB_CONCURRENCY
-        value: 1
+        value: "1"  # Single worker for memory optimization
+      - key: MODEL_LOAD_TIMEOUT
+        value: "120"  # Extended model loading timeout
+      - key: WERKZEUG_RUN_MAIN
+        value: "true"
+      - key: FLASK_SKIP_DOTENV
+        value: "1"
 

@@ -1,5 +1,28 @@
-# Model files
+# Model files (keep .gz version)
 model.pkl
+netflix_titles.csv
+
+# Large demo files
+Demo*.mp4
+Demo*.mov
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Backup directories
+*-Backup/
+*-backup/
+backup/
+Backup/
+
+# Data analysis files (not needed for deployment)
+Data Analysis/
+data_analysis/
+*.ipynb
+*.docx
+*.pdf
+*.pptx
 
 # Python
 __pycache__/
@@ -11,6 +34,12 @@ env/
 venv/
 .venv/
 ENV/
+pipenv/
+Poetry/
+.python-version
+pyproject.toml
+poetry.lock
+Pipfile*
 
 # IDE
 .vscode/
@@ -18,7 +47,35 @@ ENV/
 *.swp
 *.swo
 *~
+.spyderproject
+.spyproject
+.ropeproject
 
 # OS
 .DS_Store
 Thumbs.db
+.directory
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Local development
+.env
+.env.local
+.env.*.local
+instance/
+*.sqlite
+*.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/

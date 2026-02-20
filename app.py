@@ -8,28 +8,42 @@ import pickle
 import gzip
 import gc
 import numpy as np
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify, make_response
 import os
 import sys
 import logging
+import signal
+import threading
+import time
+from functools import lru_cache
+from datetime import datetime
 
-# Configure logging
+# Configure optimized logging for production
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     stream=sys.stderr
 )
 logger = logging.getLogger(__name__)
+logger.info(f"Starting Netflix Recommendation System v2.0 - {datetime.now()}")
 
-# Global variables for lazy loading
+# Global variables for optimized model management
 _model_data = None
-_model_loading = False  # Flag to prevent concurrent loading
+_model_loading = False
+_model_lock = threading.Lock()  # Thread safety
+_app_startup_time = time.time()
 
-# Memory management settings
-MAX_MODEL_SIZE_MB = 50  # Maximum allowed model file size
-MODEL_LOAD_TIMEOUT = 60  # Maximum time to load model
+# Production configuration
+MAX_MODEL_SIZE_MB = 50
+MODEL_LOAD_TIMEOUT = int(os.environ.get('MODEL_LOAD_TIMEOUT', 120))
+CACHE_SIZE = 128  # Cache recent searches
 
-def load_model_data():
+@lru_cache(maxsize=CACHE_SIZE)
+def cached_get_recommendations(title_lower):
+    \"\"\"Cached recommendation function for performance\"\"\"
+    return get_recommendations_internal(title_lower)
+
+def get_recommendations_internal(title_lower):
     """Lazy load model data with enhanced error handling and memory management"""
     global _model_data, _model_loading
     
@@ -265,33 +279,128 @@ def index():
 
 @app.route('/health')
 def health_check():
-    """Health check endpoint for deployment monitoring"""
+    """Comprehensive health check endpoint for production monitoring"""
     try:
-        model_data = load_model_data()
-        if model_data is None:
-            return {
-                'status': 'error',
-                'message': 'Model not loaded',
-                'model_available': False
-            }, 500
+        uptime = time.time() - _app_startup_time
         
-        return {
-            'status': 'ok',
-            'message': 'Model loaded successfully', 
-            'model_available': True,
-            'dataset_size': len(model_data['netflix_data']) if 'netflix_data' in model_data else 0
-        }, 200
+        # Basic health info
+        health_data = {
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'uptime_seconds': round(uptime, 2),
+            'uptime_human': f"{int(uptime//3600)}h {int((uptime%3600)//60)}m {int(uptime%60)}s",
+            'model_status': 'unknown',
+            'model_available': False,
+            'cache_info': {
+                'hits': 0,
+                'misses': 0,
+                'maxsize': CACHE_SIZE,
+                'currsize': 0
+            }
+        }
+        
+        # Check model availability (quick test)
+        try:
+            model_data = load_model_data()
+            if model_data is not None:
+                health_data.update({
+                    'model_status': 'loaded',
+                    'model_available': True,
+                    'dataset_size': len(model_data['netflix_data']) if 'netflix_data' in model_data else 0,
+                    'matrix_shape': list(model_data['cosine_sim'].shape) if 'cosine_sim' in model_data else [],
+                    'total_indices': len(model_data['indices']) if 'indices' in model_data else 0
+                })
+            else:
+                health_data.update({
+                    'model_status': 'failed_to_load',
+                    'model_available': False
+                })
+        except Exception as model_error:
+            health_data.update({
+                'model_status': 'error',
+                'model_available': False,
+                'model_error': str(model_error)
+            })
+        
+        # Cache statistics
+        try:
+            cache_info = cached_get_recommendations.cache_info()
+            health_data['cache_info'] = {
+                'hits': cache_info.hits,
+                'misses': cache_info.misses,
+                'maxsize': cache_info.maxsize,
+                'currsize': cache_info.currsize,
+                'hit_rate': round(cache_info.hits / (cache_info.hits + cache_info.misses) * 100, 2) if (cache_info.hits + cache_info.misses) > 0 else 0
+            }
+        except Exception:
+            pass
+        
+        # System resources (if available)
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+            health_data['system'] = {
+                'memory_percent': memory.percent,
+                'memory_available_gb': round(memory.available / (1024**3), 2),
+                'cpu_percent': psutil.cpu_percent(interval=None)
+            }
+        except (ImportError, Exception):
+            health_data['system'] = {'status': 'monitoring_unavailable'}
+        
+        status_code = 200 if health_data['model_available'] else 503
+        response = make_response(jsonify(health_data), status_code)
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        return response
+        
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        error_response = {
             'status': 'error',
-            'message': str(e),
+            'timestamp': datetime.now().isoformat(),
+            'error': str(e),
             'model_available': False
-        }, 500
+        }
+        return make_response(jsonify(error_response), 500)
 
 
-@app.route('/about', methods=['POST'])
-def getvalue():
+@app.route('/metrics')
+def metrics():
+    """Prometheus-style metrics endpoint"""
+    try:
+        uptime = time.time() - _app_startup_time
+        model_data = load_model_data()
+        
+        metrics_data = [
+            f'app_uptime_seconds {uptime:.2f}',
+            f'model_available {{model="netflix"}} {1 if model_data else 0}',
+        ]
+        
+        if model_data:
+            metrics_data.extend([
+                f'dataset_size {{model="netflix"}} {len(model_data["netflix_data"])}',
+                f'cosine_matrix_size {{model="netflix"}} {model_data["cosine_sim"].shape[0]}'
+            ])
+        
+        try:
+            cache_info = cached_get_recommendations.cache_info()
+            metrics_data.extend([
+                f'cache_hits_total {{cache="recommendations"}} {cache_info.hits}',
+                f'cache_misses_total {{cache="recommendations"}} {cache_info.misses}',
+                f'cache_size {{cache="recommendations"}} {cache_info.currsize}'
+            ])
+        except Exception:
+            pass
+        
+        response = make_response('\n'.join(metrics_data) + '\n', 200)
+        response.headers['Content-Type'] = 'text/plain; version=0.0.4'
+        return response
+        
+    except Exception as e:
+        logger.error(f"Metrics endpoint failed: {e}")
+        return make_response('# Error generating metrics\n', 500)
     """Search and recommendation route"""
     try:
         moviename = request.form.get('moviename', '').strip()
