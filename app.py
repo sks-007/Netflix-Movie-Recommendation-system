@@ -23,13 +23,31 @@ logger = logging.getLogger(__name__)
 
 # Global variables for lazy loading
 _model_data = None
+_model_loading = False  # Flag to prevent concurrent loading
+
+# Memory management settings
+MAX_MODEL_SIZE_MB = 50  # Maximum allowed model file size
+MODEL_LOAD_TIMEOUT = 60  # Maximum time to load model
 
 def load_model_data():
-    """Lazy load model data to save memory on startup"""
-    global _model_data
+    """Lazy load model data with enhanced error handling and memory management"""
+    global _model_data, _model_loading
     
     if _model_data is not None:
         return _model_data
+    
+    # Prevent concurrent loading attempts
+    if _model_loading:
+        logger.info("Model loading already in progress, waiting...")
+        import time
+        for _ in range(30):  # Wait up to 30 seconds
+            time.sleep(1)
+            if _model_data is not None:
+                return _model_data
+        logger.error("Model loading timeout")
+        return None
+    
+    _model_loading = True
     
     try:
         # Get absolute path to model file
@@ -37,34 +55,111 @@ def load_model_data():
         model_path = os.path.join(app_dir, 'model.pkl.gz')
         
         logger.info(f"Loading model from: {model_path}")
+        logger.info(f"Current working directory: {os.getcwd()}")
+        logger.info(f"App directory: {app_dir}")
         
         if not os.path.exists(model_path):
             logger.error(f"Model file not found: {model_path}")
-            logger.error(f"Files in directory: {os.listdir(app_dir)}")
+            try:
+                files_in_dir = os.listdir(app_dir)
+                logger.error(f"Files in directory: {files_in_dir}")
+                # Look for any .pkl or .gz files
+                model_files = [f for f in files_in_dir if f.endswith(('.pkl', '.pkl.gz', '.gz'))]
+                logger.error(f"Model-related files found: {model_files}")
+            except Exception as list_error:
+                logger.error(f"Error listing directory: {list_error}")
             return None
         
-        file_size_mb = os.path.getsize(model_path) / (1024 * 1024)
-        logger.info(f"Model file size: {file_size_mb:.2f} MB")
+        # Check file size and accessibility
+        try:
+            file_size_mb = os.path.getsize(model_path) / (1024 * 1024)
+            logger.info(f"Model file size: {file_size_mb:.2f} MB")
+            
+            if file_size_mb > MAX_MODEL_SIZE_MB:
+                logger.error(f"Model file too large: {file_size_mb:.2f} MB (max: {MAX_MODEL_SIZE_MB} MB)")
+                return None
+                
+            # Check file permissions
+            if not os.access(model_path, os.R_OK):
+                logger.error(f"No read permission for model file: {model_path}")
+                return None
+                
+        except Exception as size_error:
+            logger.error(f"Error checking model file: {size_error}")
+            return None
         
-        with gzip.open(model_path, 'rb') as file:
-            _model_data = pickle.load(file)
+        # Load the model with timeout protection
+        logger.info("Starting model loading...")
+        import signal
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutError(f"Model loading exceeded {MODEL_LOAD_TIMEOUT} seconds")
+        
+        # Set up timeout (Unix-like systems)
+        try:
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(MODEL_LOAD_TIMEOUT)
+        except (AttributeError, ValueError):
+            # Windows doesn't support SIGALRM
+            logger.info("Timeout protection not available on this platform")
+        
+        try:
+            with gzip.open(model_path, 'rb') as file:
+                _model_data = pickle.load(file)
+        finally:
+            try:
+                signal.alarm(0)  # Disable the alarm
+            except (AttributeError, ValueError):
+                pass
+        
+        # Validate loaded data
+        if _model_data is None:
+            logger.error("Loaded model data is None")
+            return None
+            
+        if not isinstance(_model_data, dict):
+            logger.error(f"Invalid model data type: {type(_model_data)}")
+            return None
+            
+        required_keys = ['cosine_sim', 'netflix_data', 'indices']
+        missing_keys = [key for key in required_keys if key not in _model_data]
+        if missing_keys:
+            logger.error(f"Missing required keys in model: {missing_keys}")
+            return None
         
         logger.info("Model loaded successfully!")
         logger.info(f"Model keys: {list(_model_data.keys())}")
-        logger.info(f"Cosine matrix dtype: {_model_data['cosine_sim'].dtype}")
-        logger.info(f"Cosine matrix shape: {_model_data['cosine_sim'].shape}")
-        logger.info(f"Dataset shape: {_model_data['netflix_data'].shape}")
-        logger.info(f"Number of titles: {len(_model_data['indices'])}")
         
+        # Log model details with error handling
+        try:
+            logger.info(f"Cosine matrix dtype: {_model_data['cosine_sim'].dtype}")
+            logger.info(f"Cosine matrix shape: {_model_data['cosine_sim'].shape}")
+            logger.info(f"Dataset shape: {_model_data['netflix_data'].shape}")
+            logger.info(f"Number of titles: {len(_model_data['indices'])}")
+        except Exception as detail_error:
+            logger.warning(f"Error logging model details: {detail_error}")
+        
+        # Force garbage collection
         gc.collect()
-        logger.info("Garbage collection completed")
+        logger.info("Model loading completed with garbage collection")
         
         return _model_data
         
+    except TimeoutError as e:
+        logger.error(f"Model loading timeout: {e}")
+        _model_data = None
+        return None
+    except MemoryError as e:
+        logger.error(f"Memory error loading model: {e}")
+        logger.error("Try reducing model size or upgrading server resources")
+        _model_data = None
+        return None
     except Exception as e:
         logger.error(f"Error loading model: {type(e).__name__}: {e}", exc_info=True)
         _model_data = None
         return None
+    finally:
+        _model_loading = False
 
 
 def get_recommendations(title, cosine_sim):
@@ -168,6 +263,33 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for deployment monitoring"""
+    try:
+        model_data = load_model_data()
+        if model_data is None:
+            return {
+                'status': 'error',
+                'message': 'Model not loaded',
+                'model_available': False
+            }, 500
+        
+        return {
+            'status': 'ok',
+            'message': 'Model loaded successfully', 
+            'model_available': True,
+            'dataset_size': len(model_data['netflix_data']) if 'netflix_data' in model_data else 0
+        }, 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            'status': 'error',
+            'message': str(e),
+            'model_available': False
+        }, 500
+
+
 @app.route('/about', methods=['POST'])
 def getvalue():
     """Search and recommendation route"""
@@ -183,10 +305,27 @@ def getvalue():
         
         logger.info(f"Processing search request for: {moviename}")
         
-        # Load model and get recommendations
+        # Load model and get recommendations with enhanced error handling
         model_data = load_model_data()
         if model_data is None:
-            logger.error("Model failed to load")
+            logger.error("Model failed to load - providing detailed error message")
+            
+            # Try to provide more specific error information
+            error_details = []
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(app_dir, 'model.pkl.gz')
+            
+            if not os.path.exists(model_path):
+                error_details.append("Model file not found in deployment")
+            else:
+                try:
+                    file_size = os.path.getsize(model_path) / (1024 * 1024)
+                    error_details.append(f"Model file exists ({file_size:.1f}MB) but failed to load")
+                except:
+                    error_details.append("Model file exists but cannot read size")
+            
+            logger.error(f"Error details: {'; '.join(error_details)}")
+            
             return render_template('index.html',
                                  error=True,
                                  movie_name=moviename,
@@ -263,4 +402,14 @@ def server_error(error):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"Starting app on port {port}")
+    
+    # Pre-load model in development for faster testing
+    if os.environ.get('FLASK_ENV') != 'production':
+        logger.info("Pre-loading model for development...")
+        model_data = load_model_data()
+        if model_data:
+            logger.info("Model pre-loaded successfully")
+        else:
+            logger.warning("Model pre-loading failed")
+    
     app.run(debug=False, host='0.0.0.0', port=port)
